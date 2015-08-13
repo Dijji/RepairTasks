@@ -1,0 +1,34 @@
+﻿<Window x:Class="RepairTasks.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Repair Tasks" Height="350" Width="525">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="40" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="35" />
+        </Grid.RowDefinitions>
+        <StackPanel Grid.Row="0"  Height="40" HorizontalAlignment="Left" Name="stackPanel1" VerticalAlignment="Top" Width="503" Orientation="Horizontal">
+            <Button Content="Scan" Margin="10,0,0,0" Height="23" Name="scan" Width="75" FontSize="12" Click="scan_Click" IsEnabled="{Binding Path=CanScan}"/>
+            <Button Content="Repair" Margin="10,0,0,0" Height="23" Name="repair" Width="75" FontSize="12" Click="repair_Click"  IsEnabled="{Binding Path=CanRepair}" />
+            <RadioButton Margin="40,0,0,0" Content="Recycle existing tasks" Height="16" Name="rbExisting" FontSize="12" IsChecked="True" />
+            <RadioButton Margin="10,0,0,0" Content="Take tasks from backup" Height="16" Name="rbCopy" FontSize="12" />
+        </StackPanel>
+        <ListBox Grid.Row="1" Name="lbReports" ItemsSource="{Binding Path=Reports}" FontSize="12" >
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding Path=Text}" />
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="100"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Margin="12,7,0,0" Name="textBlock1" Text="{Binding Path=Status}" FontSize="12" />
+            <Button Grid.Column="1" Content="Save Results" Margin="10,7,5,5" Name="save" FontSize="12" Click="save_Click"  />
+        </Grid>
+
+    </Grid>
+</Window>
