@@ -129,25 +129,23 @@ namespace RepairTasks
                 p.StartInfo.Arguments = "/query /tn \"" + relPath + fi.Name + "\"";
                 p.Start();
                 string output = p.StandardOutput.ReadToEnd();
-                string error = p.StandardError.ReadToEnd();
+                string error = p.StandardError.ReadToEnd().Replace("\r", "").Replace("\n", "");
                 p.WaitForExit();
 
-                // TODO: break the dependence on the specific English form of these messages
-                if (output.Length == 0 && error.StartsWith("ERROR: The task image is corrupt or has been tampered with."))
+               
+                if (p.ExitCode != 0)
                 {
                     state.Targets.Add(new Target { RelativePath = relPath, Name = fi.Name });
                     Application.Current.Dispatcher.Invoke(new Action(delegate
                     {
-                        state.Reports.Add(new Report("Task image corrupt: " + relPath + fi.Name));
+                        // TODO: break the dependence on the specific English form of these messages
+                        if (error.StartsWith("ERROR: The task image is corrupt or has been tampered with."))
+                            state.Reports.Add(new Report("Task image corrupt: " + relPath + fi.Name));
+                        else if (error.StartsWith("ERROR: The system cannot find the file specified"))
+                            state.Reports.Add(new Report("Task not installed: " + relPath + fi.Name));
+                        else 
+                            state.Reports.Add(new Report(String.Format("Task {0} reported '{1}'", relPath + fi.Name, error)));
                     }));                    
-                }
-                else if (output.Length == 0 && error.StartsWith("ERROR: The system cannot find the file specified"))
-                {
-                    state.Targets.Add(new Target { RelativePath = relPath, Name = fi.Name });
-                    Application.Current.Dispatcher.Invoke(new Action(delegate
-                    {
-                        state.Reports.Add(new Report("Task not installed: " + relPath + fi.Name));
-                    }));
                 }
             }
 
@@ -165,7 +163,24 @@ namespace RepairTasks
 
             foreach (Target target in state.Targets)
             {
-                // First, identify or set up the task file to be installed
+                // Copy the existing file to the temp folder
+                string tempFilePath = Path.GetTempPath() + @"\" + target.Name;
+
+                try
+                {
+                    File.Copy(rootDir + target.FullName, tempFilePath);
+                }
+                catch (System.Exception e)
+                {
+                    Application.Current.Dispatcher.Invoke(new Action(delegate
+                    {
+                        state.Reports.Add(new Report(String.Format("Cannot copy task file '{0}', {1}", rootDir + target.FullName, e.Message)));
+                    }));
+
+                    continue;
+                }
+
+                // Identify the task file to be installed
                 string taskFilePath = null;
                 if (state.UseCopy)
                 {
@@ -181,27 +196,16 @@ namespace RepairTasks
                         {
                             state.Reports.Add(new Report(String.Format("Cannot find either '{0}' or '{1}'", shortPath, fullPath)));
                         }));
+
+                        // Clean up temp file
+                        File.Delete(tempFilePath);
+
                         continue;
                     }
                 }
                 else
-                { 
-                    // Copy the existing file to the temp folder
-                    taskFilePath = Path.GetTempPath() + @"\" + target.Name;
-
-                    try
-                    {
-                        File.Copy(rootDir + target.FullName, taskFilePath);
-                    }
-                    catch (System.Exception e)
-                    {    
-                        Application.Current.Dispatcher.Invoke(new Action(delegate
-                        {
-                            state.Reports.Add(new Report(String.Format("Cannot copy task file '{0}', {1}", rootDir + target.FullName, e.Message)));
-                        }));
-
-                        continue;
-                    }
+                {
+                    taskFilePath = tempFilePath;
                 }
 
                 // Delete existing task files
@@ -221,9 +225,8 @@ namespace RepairTasks
                         state.Reports.Add(new Report(String.Format("Cannot delete task file '{0}', '{1}'", rootDir + target.FullName, e.Message)));
                     }));
 
-                    // Clean up any temp file
-                    if (!state.UseCopy)
-                        File.Delete(taskFilePath);
+                    // Clean up temp file
+                    File.Delete(tempFilePath);
 
                     continue;
                 }
@@ -266,17 +269,32 @@ namespace RepairTasks
                 string error = p.StandardError.ReadToEnd().Replace("\r", "").Replace("\n", "");
                 p.WaitForExit();
 
+                // If setup failed, restore the task file so that the next scan picks it up
+                if (p.ExitCode != 0)
+                {
+                    try
+                    {
+                        File.Copy(tempFilePath, rootDir + target.FullName);
+                    }
+                    catch (System.Exception e)
+                    {
+                        Application.Current.Dispatcher.Invoke(new Action(delegate
+                        {
+                            state.Reports.Add(new Report(String.Format("Cannot restore task file '{0}', {1}", rootDir + target.FullName, e.Message)));
+                        }));
+                    }
+                }
+
                 Application.Current.Dispatcher.Invoke(new Action(delegate
                 {
-                    if (output.StartsWith("SUCCESS"))
+                    if (p.ExitCode == 0)
                         state.Reports.Add(new Report("Recovered task: " + target.FullName));
                     else
-                        state.Reports.Add(new Report("Error '" + error + "'recovering task: " + target.FullName));
+                        state.Reports.Add(new Report(String.Format("Recovery of task {0} failed with '{1}'",  target.FullName, error)));
                 }));
 
-                // Clean up any temp file
-                if (!state.UseCopy)
-                    File.Delete(taskFilePath);
+                // Clean up temp file
+                File.Delete(tempFilePath);
             }
 
             Application.Current.Dispatcher.Invoke(new Action(delegate
