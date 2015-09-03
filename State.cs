@@ -25,6 +25,7 @@ namespace RepairTasks
         public bool CanRepair { get { return canRepair; } set { canRepair = value; OnPropertyChanged("CanRepair"); } }
         public bool UseCopy { get; set; }
         public string CopyPath { get; set; }
+        public string BackupPath { get; set; }
 
         public void Reset()
         {

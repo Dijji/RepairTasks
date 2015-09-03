@@ -48,13 +48,19 @@ namespace RepairTasks
             state.Reports.Clear();
             state.UseCopy = (rbCopy.IsChecked == true);
 
+            // See if they want a backup
+            MessageBoxResult r = MessageBox.Show("Repair will make changes to your system. If you have not made a backup of your task files, " + 
+                "using the Backup Tasks button below, now might be a good time. Do you want to proceed with the Repair?", "Proceed?", MessageBoxButton.YesNo);
+            if (r == MessageBoxResult.No)
+                return;
+
             // If we are using an independent source of task XML files, prompt for the folder that contains them
             if (state.UseCopy)
             {
                 System.Windows.Forms.FolderBrowserDialog dialog = new System.Windows.Forms.FolderBrowserDialog
                 {
                     ShowNewFolderButton = false,
-                    RootFolder = Environment.SpecialFolder.MyComputer,
+                    RootFolder = Environment.SpecialFolder.MyDocuments,
                     Description = "Select the directory containing the backed up task files to be installed."
                 };
 
@@ -69,6 +75,23 @@ namespace RepairTasks
             state.Status = "Repairing...";
 
             ThreadPool.QueueUserWorkItem(Repair, state);
+        }
+
+        private void backup_Click(object sender, RoutedEventArgs e)
+        {
+            state.Reports.Clear();
+            state.Status = "";
+            System.Windows.Forms.FolderBrowserDialog dialog = new System.Windows.Forms.FolderBrowserDialog
+            {
+                ShowNewFolderButton = false,
+                RootFolder = Environment.SpecialFolder.MyDocuments,
+                Description = "Select a folder to create task backups in."
+            };
+
+            if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+                return;
+
+            BackupTasks(dialog.SelectedPath);
         }
 
         private void save_Click(object sender, RoutedEventArgs e)
@@ -97,17 +120,23 @@ namespace RepairTasks
         {
             State state = (State)obj;
 
-            DirectoryInfo root = new DirectoryInfo(rootDir);
+            try
+            {
+                DirectoryInfo root = new DirectoryInfo(rootDir);
 
-            ScanDirectory(state, root);
+                ScanDirectory(state, root);
+            }
+            catch (System.Exception ex)
+            {
+                AddReport(state, String.Format("Scan terminated by unexpected error '{0}'", ex.Message));
+            }
 
             Application.Current.Dispatcher.Invoke(new Action(delegate
             {
                 state.Status = String.Format("Scan completed: {0} problems found", state.Targets.Count);
                 state.CanScan = true;
                 state.CanRepair = state.Targets.Count > 0;
-            }));   
-
+            }));
         }
 
         private static void ScanDirectory(State state, DirectoryInfo di)
@@ -161,147 +190,223 @@ namespace RepairTasks
         {
             State state = (State)obj;
 
-            foreach (Target target in state.Targets)
+            try
             {
-                // Copy the existing file to the temp folder
-                string tempFilePath = Path.GetTempPath() + @"\" + target.Name;
-
-                try
+                foreach (Target target in state.Targets)
                 {
-                    File.Copy(rootDir + target.FullName, tempFilePath);
-                }
-                catch (System.Exception e)
-                {
-                    Application.Current.Dispatcher.Invoke(new Action(delegate
-                    {
-                        state.Reports.Add(new Report(String.Format("Cannot copy task file '{0}', {1}", rootDir + target.FullName, e.Message)));
-                    }));
+                    // Copy the existing file to the temp folder
+                    string tempFilePath = Path.GetTempPath() + @"\" + target.Name;
+                    Dictionary<string, string> dictRegKeys = new Dictionary<string, string>();
+                    bool success = false;
+                    bool deletedTask = false;
+                    bool deletedKeys = false;
 
-                    continue;
-                }
-
-                // Identify the task file to be installed
-                string taskFilePath = null;
-                if (state.UseCopy)
-                {
-                    string fullPath = state.CopyPath + @"\" + target.FullName;
-                    string shortPath = state.CopyPath + @"\" + target.Name;
-                    if (File.Exists(fullPath))
-                        taskFilePath = fullPath;
-                    else if (File.Exists(shortPath))
-                        taskFilePath = shortPath;
-                    else
-                    {
-                        Application.Current.Dispatcher.Invoke(new Action(delegate
-                        {
-                            state.Reports.Add(new Report(String.Format("Cannot find either '{0}' or '{1}'", shortPath, fullPath)));
-                        }));
-
-                        // Clean up temp file
-                        File.Delete(tempFilePath);
-
-                        continue;
-                    }
-                }
-                else
-                {
-                    taskFilePath = tempFilePath;
-                }
-
-                // Delete existing task files
-                try
-                {
-                    File.Delete(rootDir + target.FullName);
-
-                    // zap \windows\tasks\foo.job as well - if present, blocks create
-                    string jobFile = Path.GetDirectoryName(Environment.SystemDirectory) + @"\tasks\" + target.Name + ".job";
-                    if (File.Exists(jobFile))
-                        File.Delete(jobFile);
-                }
-                catch (System.Exception e)
-                {
-                    Application.Current.Dispatcher.Invoke(new Action(delegate
-                    {
-                        state.Reports.Add(new Report(String.Format("Cannot delete task file '{0}', '{1}'", rootDir + target.FullName, e.Message)));
-                    }));
-
-                    // Clean up temp file
-                    File.Delete(tempFilePath);
-
-                    continue;
-                }
-
-                // Clean up registry keys
-                string treeKeyPath = TaskCache + @"Tree\" + target.FullName;
-                var treeKey = Registry.LocalMachine.OpenSubKey(treeKeyPath);
-                if (treeKey != null)
-                {
-                    string id = treeKey.GetValue("Id") as string;
-                    if (id != null)
-                    {
-                        Registry.LocalMachine.DeleteSubKey(TaskCache + Tasks + id);
-
-                        int index;
-                        for (index = 0; index < 3; index++)
-                        {
-                            if (null != Registry.LocalMachine.OpenSubKey(TaskCache + Groups[index] + id))
-                                break;
-                        }
-
-                        if (index < 3)
-                        {
-                            Registry.LocalMachine.DeleteSubKey(TaskCache + Groups[index] + id);
-                        }
-                    }
-                    Registry.LocalMachine.DeleteSubKey(treeKeyPath);
-                }
-
-                Process p = new Process();
-                // Redirect the output stream of the child process.
-                p.StartInfo.UseShellExecute = false;
-                p.StartInfo.RedirectStandardOutput = true;
-                p.StartInfo.RedirectStandardError = true;
-                p.StartInfo.CreateNoWindow = true;
-                p.StartInfo.FileName = Environment.GetFolderPath(Environment.SpecialFolder.System) + @"\schtasks.exe";
-                p.StartInfo.Arguments = "/create /tn \"" + target.FullName + "\" /xml \"" + taskFilePath + "\"";
-                p.Start();
-                string output = p.StandardOutput.ReadToEnd();
-                string error = p.StandardError.ReadToEnd().Replace("\r", "").Replace("\n", "");
-                p.WaitForExit();
-
-                // If setup failed, restore the task file so that the next scan picks it up
-                if (p.ExitCode != 0)
-                {
                     try
                     {
-                        File.Copy(tempFilePath, rootDir + target.FullName);
+                        File.Copy(rootDir + target.FullName, tempFilePath);
                     }
                     catch (System.Exception e)
                     {
-                        Application.Current.Dispatcher.Invoke(new Action(delegate
+                        AddReport(state, String.Format("Cannot copy task file '{0}', {1}", rootDir + target.FullName, e.Message));
+
+                        continue;
+                    }
+
+                    try
+                    {
+                        // Identify the task file to be installed
+                        string taskFilePath = null;
+                        if (state.UseCopy)
                         {
-                            state.Reports.Add(new Report(String.Format("Cannot restore task file '{0}', {1}", rootDir + target.FullName, e.Message)));
-                        }));
+                            string fullPath = state.CopyPath + @"\" + target.FullName;
+                            string shortPath = state.CopyPath + @"\" + target.Name;
+                            if (File.Exists(fullPath))
+                                taskFilePath = fullPath;
+                            else if (File.Exists(shortPath))
+                                taskFilePath = shortPath;
+                            else
+                            {
+                                AddReport(state, String.Format("Cannot find either '{0}' or '{1}'", shortPath, fullPath));
+
+                                // Clean up temp file
+                                File.Delete(tempFilePath);
+
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            taskFilePath = tempFilePath;
+                        }
+
+                        // Find the registry entries
+                        string treeKeyPath = TaskCache + @"Tree\" + target.FullName;
+                        string keyPath = null;
+
+                        var treeKey = Registry.LocalMachine.OpenSubKey(treeKeyPath);
+                        if (treeKey != null)
+                        {
+                            dictRegKeys.Add(treeKeyPath, null);
+                            string id = treeKey.GetValue("Id") as string;
+                            if (id != null)
+                            {
+                                // Check under Tasks
+                                keyPath = TaskCache + Tasks + id;
+                                if (null != Registry.LocalMachine.OpenSubKey(keyPath))
+                                    dictRegKeys.Add(keyPath, null);
+
+                                // and the groups
+                                foreach (string group in Groups)
+                                {
+                                    keyPath = TaskCache + group + id;
+                                    if (null != Registry.LocalMachine.OpenSubKey(keyPath))
+                                        dictRegKeys.Add(keyPath, null);
+                                }
+                            }
+                        }
+                        else
+                            treeKeyPath = null;
+
+                        // Save the registry entries
+                        uint result = RegKey.ExportRegKeys(dictRegKeys);
+                        if (result != 0)
+                        {
+                            AddReport(state, String.Format("Error {0} backing up registry keys for task {1}", result, target.FullName));
+                            continue;
+                        }
+
+                        // Delete existing task files
+                        try
+                        {
+                            File.Delete(rootDir + target.FullName);
+
+                            // zap \windows\tasks\foo.job as well - if present, blocks create
+                            string jobFile = Path.GetDirectoryName(Environment.SystemDirectory) + @"\tasks\" + target.Name + ".job";
+                            if (File.Exists(jobFile))
+                                File.Delete(jobFile);
+
+                            deletedTask = true;
+                        }
+                        catch (System.Exception e)
+                        {
+                            AddReport(state, String.Format("Cannot delete task file '{0}', '{1}'", rootDir + target.FullName, e.Message));
+                            continue;
+                        }
+
+                        // Delete registry keys
+                        foreach (string key in dictRegKeys.Keys)
+                            Registry.LocalMachine.DeleteSubKey(key);
+                        deletedKeys = true;
+
+                        Process p = new Process();
+                        // Redirect the output stream of the child process.
+                        p.StartInfo.UseShellExecute = false;
+                        p.StartInfo.RedirectStandardOutput = true;
+                        p.StartInfo.RedirectStandardError = true;
+                        p.StartInfo.CreateNoWindow = true;
+                        p.StartInfo.FileName = Environment.GetFolderPath(Environment.SpecialFolder.System) + @"\schtasks.exe";
+                        p.StartInfo.Arguments = "/create /tn \"" + target.FullName + "\" /xml \"" + taskFilePath + "\"";
+                        p.Start();
+                        string output = p.StandardOutput.ReadToEnd();
+                        string error = p.StandardError.ReadToEnd().Replace("\r", "").Replace("\n", "");
+                        p.WaitForExit();
+
+                        if (p.ExitCode == 0)
+                        {
+                            AddReport(state, "Recovered task: " + target.FullName);
+                            success = true;
+                        }
+                        else
+                            AddReport(state, String.Format("Recovery of task {0} failed with '{1}'", target.FullName, error));
+
+                    }
+                    catch (System.Exception ex)
+                    {
+                        AddReport(state, String.Format("Repair of task {0} terminated by unexpected error '{1}'", target.FullName, ex.Message));
+                    }
+                    finally
+                    {
+                        // If setup failed, restore the state so that the next scan picks it up
+                        if (!success)
+                        {
+                            if (deletedTask)
+                                RestoreTaskFile(state, tempFilePath, rootDir + target.FullName);
+
+                            if (deletedKeys)
+                            {
+                                uint result = RegKey.RestoreRegKeys(dictRegKeys);
+                                if (result != 0)
+                                    AddReport(state, String.Format("Error {0} restoring registry keys for task {1}", result, target.FullName));
+                            }
+                        }
+
+                        // Clean up temp files
+                        File.Delete(tempFilePath);
+                        foreach (string tempFile in dictRegKeys.Values)
+                        {
+                            if (tempFile != null)
+                                File.Delete(tempFile);
+                        }
                     }
                 }
 
                 Application.Current.Dispatcher.Invoke(new Action(delegate
                 {
-                    if (p.ExitCode == 0)
-                        state.Reports.Add(new Report("Recovered task: " + target.FullName));
-                    else
-                        state.Reports.Add(new Report(String.Format("Recovery of task {0} failed with '{1}'",  target.FullName, error)));
+                    state.Status = "Repair completed";
+                    state.CanScan = true;
                 }));
-
-                // Clean up temp file
-                File.Delete(tempFilePath);
             }
+            catch (System.Exception ex)
+            {
+                AddReport(state, String.Format("Repair terminated by unexpected error '{0}'", ex.Message));
+            }
+        }
 
+        private static void AddReport(State state, string report)
+        {
             Application.Current.Dispatcher.Invoke(new Action(delegate
             {
-                state.Status = "Repair completed";
-                state.CanScan = true;
-            })); 
+                state.Reports.Add(new Report(report));
+            }));
+        }
+
+        private static void RestoreTaskFile(State state, string tempFile, string taskFile)
+        {
+            try
+            {
+                File.Copy(tempFile, taskFile);
+            }
+            catch (System.Exception e)
+            {
+                AddReport(state, String.Format("Cannot restore task file '{0}', {1}", taskFile, e.Message));
+            }
+        }
+
+        private void BackupTasks(string path)
+        {
+            string source = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "Tasks");
+            string target = Path.Combine(path, String.Format("Tasks {0:yyyy-MM-dd HHmmss}", DateTime.Now));
+
+            Process p = new Process();
+            p.StartInfo.UseShellExecute = true;
+            //p.StartInfo.RedirectStandardOutput = true;
+            //p.StartInfo.RedirectStandardError = true;
+            p.StartInfo.CreateNoWindow = false;
+            p.StartInfo.FileName = "xcopy";
+            p.StartInfo.Arguments = "/S /I /E \"" + source +  "\" \"" + target + "\"";
+            p.Start();
+            //string output = p.StandardOutput.ReadToEnd();
+            //string error = p.StandardError.ReadToEnd().Replace("\r", "").Replace("\n", "");
+            p.WaitForExit();
+
+            if (p.ExitCode == 0)
+            {
+                AddReport(state, "Backed up tasks to: " + target);
+            }
+            else
+            {
+                AddReport(state, String.Format("Task back up failed with error '{0}'", p.ExitCode));
+            }
         }
     }
 }

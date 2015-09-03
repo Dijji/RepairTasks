@@ -76,6 +76,7 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
+    <Compile Include="RegKey.cs" />
     <Compile Include="Report.cs" />
     <Compile Include="State.cs" />
     <Compile Include="Target.cs" />

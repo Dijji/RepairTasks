@@ -25,9 +25,11 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="100"/>
+                <ColumnDefinition Width="100"/>
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Margin="12,7,0,0" Name="textBlock1" Text="{Binding Path=Status}" FontSize="12" />
-            <Button Grid.Column="1" Content="Save Results" Margin="10,7,5,5" Name="save" FontSize="12" Click="save_Click"  />
+            <Button Grid.Column="1" Content="Backup Tasks" Margin="10,7,5,5" Name="backup" FontSize="12" Click="backup_Click"  />
+            <Button Grid.Column="2" Content="Save Results" Margin="10,7,5,5" Name="save" FontSize="12" Click="save_Click"  />
         </Grid>
 
     </Grid>
