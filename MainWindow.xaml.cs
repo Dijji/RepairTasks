@@ -49,10 +49,14 @@ namespace RepairTasks
             state.UseCopy = (rbCopy.IsChecked == true);
 
             // See if they want a backup
-            MessageBoxResult r = MessageBox.Show("Repair will make changes to your system. If you have not made a backup of your task files, " + 
-                "using the Backup Tasks button below, now might be a good time. Do you want to proceed with the Repair?", "Proceed?", MessageBoxButton.YesNo);
-            if (r == MessageBoxResult.No)
-                return;
+            if (!Properties.Settings.Default.HasBackedUp)
+            {
+                MessageBoxResult r = MessageBox.Show("Repair will make changes to your system. If you have not made a backup of your task files, " +
+                    "using the Backup Tasks button below, now might be a good time. Do you want to proceed with the Repair?", 
+                    "Proceed?", MessageBoxButton.YesNo);
+                if (r == MessageBoxResult.No)
+                    return;
+            }
 
             // If we are using an independent source of task XML files, prompt for the folder that contains them
             if (state.UseCopy)
@@ -115,6 +119,7 @@ namespace RepairTasks
         }
 
         private static string rootDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "Tasks") + @"\";
+        private static string hiddenSuffix = "._hidden_";
 
         private static void Scan(Object obj)
         {
@@ -145,8 +150,26 @@ namespace RepairTasks
             if (relPath.Length > 0)
                 relPath += @"\";
 
+            // Our backstop mechanism to avoid losing track of task files is to rename them with a special suffix,
+            // rather than deleting them, when we want to try reinstallation.
+            // Then, at the next scan, we clean the hidden files up, or restore them 
+            List<FileInfo> hidden = new List<FileInfo>(di.GetFiles().Where(fi => fi.FullName.EndsWith(hiddenSuffix)));
+            foreach (var fi in hidden)
+            {
+                string realName = fi.FullName.Substring(0, fi.FullName.Length - hiddenSuffix.Length);
+                if (File.Exists(realName))
+                    fi.Delete();
+                else
+                    fi.CopyTo(realName);
+            }
+
             foreach (var fi in di.GetFiles())
             {
+                if (fi.FullName.EndsWith(hiddenSuffix))
+                {
+                    continue;
+                }
+
                 // Start the child process.
                 Process p = new Process();
                 // Redirect the output stream of the child process.
@@ -198,7 +221,7 @@ namespace RepairTasks
                     string tempFilePath = Path.GetTempPath() + @"\" + target.Name;
                     Dictionary<string, string> dictRegKeys = new Dictionary<string, string>();
                     bool success = false;
-                    bool deletedTask = false;
+                    bool renamedTask = false;
                     bool deletedKeys = false;
 
                     try
@@ -275,17 +298,21 @@ namespace RepairTasks
                             continue;
                         }
 
-                        // Delete existing task files
+                        // Rename or delete existing task files
                         try
                         {
-                            File.Delete(rootDir + target.FullName);
+                            string hiddenTaskFile = rootDir + target.FullName + hiddenSuffix;
+                            if (File.Exists(hiddenTaskFile))
+                                File.Delete(hiddenTaskFile);
+
+                            File.Move(rootDir + target.FullName, hiddenTaskFile);
 
                             // zap \windows\tasks\foo.job as well - if present, blocks create
                             string jobFile = Path.GetDirectoryName(Environment.SystemDirectory) + @"\tasks\" + target.Name + ".job";
                             if (File.Exists(jobFile))
                                 File.Delete(jobFile);
 
-                            deletedTask = true;
+                            renamedTask = true;
                         }
                         catch (System.Exception e)
                         {
@@ -329,7 +356,7 @@ namespace RepairTasks
                         // If setup failed, restore the state so that the next scan picks it up
                         if (!success)
                         {
-                            if (deletedTask)
+                            if (renamedTask)
                                 RestoreTaskFile(state, tempFilePath, rootDir + target.FullName);
 
                             if (deletedKeys)
@@ -374,7 +401,7 @@ namespace RepairTasks
         {
             try
             {
-                File.Copy(tempFile, taskFile);
+                File.Copy(taskFile + hiddenSuffix, taskFile);
             }
             catch (System.Exception e)
             {
@@ -402,6 +429,7 @@ namespace RepairTasks
             if (p.ExitCode == 0)
             {
                 AddReport(state, "Backed up tasks to: " + target);
+                Properties.Settings.Default.HasBackedUp = true;
             }
             else
             {

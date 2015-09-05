@@ -157,10 +157,13 @@ namespace RepairTasks
                     {
                         result = RegRestoreKey(hKey, backupFile, 0);
 
+                        System.Diagnostics.Trace.WriteLine(String.Format("RegRestoreKey returned {0}", result));
+
                         if (result == 1314)  // ERROR_PRIVILEGE_NOT_HELD
                         {
                             EnableDisablePrivilege("SeRestorePrivilege", true);  // throws on failure
                             result = RegRestoreKey(hKey, backupFile, 0);
+                            System.Diagnostics.Trace.WriteLine(String.Format("RegRestoreKey #2 returned {0}", result));
                         }
 
                         RegCloseKey(hKey);
