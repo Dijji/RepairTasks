@@ -114,6 +114,7 @@ namespace RepairTasks
                 {
                     sw.WriteLine(r.Text);
                 }
+                sw.WriteLine(state.Status);
                 sw.Close();
             }
         }
@@ -124,6 +125,7 @@ namespace RepairTasks
         private static void Scan(Object obj)
         {
             State state = (State)obj;
+            bool abnormal = false;
 
             try
             {
@@ -134,11 +136,12 @@ namespace RepairTasks
             catch (System.Exception ex)
             {
                 AddReport(state, String.Format("Scan terminated by unexpected error '{0}'", ex.Message));
+                abnormal = true;
             }
 
             Application.Current.Dispatcher.Invoke(new Action(delegate
             {
-                state.Status = String.Format("Scan completed: {0} problems found", state.Targets.Count);
+                state.Status = String.Format("Scan completed{0}: {1} problems found", abnormal ? " abnormally" : "", state.Targets.Count);
                 state.CanScan = true;
                 state.CanRepair = state.Targets.Count > 0;
             }));
@@ -170,34 +173,41 @@ namespace RepairTasks
                     continue;
                 }
 
-                // Start the child process.
-                Process p = new Process();
-                // Redirect the output stream of the child process.
-                p.StartInfo.UseShellExecute = false;
-                p.StartInfo.RedirectStandardOutput = true;
-                p.StartInfo.RedirectStandardError = true;
-                p.StartInfo.CreateNoWindow = true;
-                p.StartInfo.FileName = Environment.GetFolderPath(Environment.SpecialFolder.System) + @"\schtasks.exe";
-                p.StartInfo.Arguments = "/query /tn \"" + relPath + fi.Name + "\"";
-                p.Start();
-                string output = p.StandardOutput.ReadToEnd();
-                string error = p.StandardError.ReadToEnd().Replace("\r", "").Replace("\n", "");
-                p.WaitForExit();
+                try
+                {
+                    // Start the child process.
+                    Process p = new Process();
+                    // Redirect the output stream of the child process.
+                    p.StartInfo.UseShellExecute = false;
+                    p.StartInfo.RedirectStandardOutput = true;
+                    p.StartInfo.RedirectStandardError = true;
+                    p.StartInfo.CreateNoWindow = true;
+                    p.StartInfo.FileName = Environment.GetFolderPath(Environment.SpecialFolder.System) + @"\schtasks.exe";
+                    p.StartInfo.Arguments = "/query /tn \"" + relPath + fi.Name + "\"";
+                    p.Start();
+                    string output = p.StandardOutput.ReadToEnd();
+                    string error = p.StandardError.ReadToEnd().Replace("\r", "").Replace("\n", "");
+                    p.WaitForExit();
 
-               
-                if (p.ExitCode != 0)
+                    if (p.ExitCode != 0)
+                    {
+                        state.Targets.Add(new Target { RelativePath = relPath, Name = fi.Name });
+                        Application.Current.Dispatcher.Invoke(new Action(delegate
+                        {
+                            // TODO: break the dependence on the specific English form of these messages
+                            if (error.StartsWith("ERROR: The task image is corrupt or has been tampered with."))
+                                state.Reports.Add(new Report("Task image corrupt: " + relPath + fi.Name));
+                            else if (error.StartsWith("ERROR: The system cannot find the file specified"))
+                                state.Reports.Add(new Report("Task not installed: " + relPath + fi.Name));
+                            else 
+                                state.Reports.Add(new Report(String.Format("Task {0} reported '{1}'", relPath + fi.Name, error)));
+                        }));    
+                    }
+                }
+                catch (System.Exception ex)
                 {
                     state.Targets.Add(new Target { RelativePath = relPath, Name = fi.Name });
-                    Application.Current.Dispatcher.Invoke(new Action(delegate
-                    {
-                        // TODO: break the dependence on the specific English form of these messages
-                        if (error.StartsWith("ERROR: The task image is corrupt or has been tampered with."))
-                            state.Reports.Add(new Report("Task image corrupt: " + relPath + fi.Name));
-                        else if (error.StartsWith("ERROR: The system cannot find the file specified"))
-                            state.Reports.Add(new Report("Task not installed: " + relPath + fi.Name));
-                        else 
-                            state.Reports.Add(new Report(String.Format("Task {0} reported '{1}'", relPath + fi.Name, error)));
-                    }));                    
+                    AddReport(state, String.Format("Scan of task {0} terminated by unexpected error '{1}'", relPath + fi.Name, ex.Message));
                 }
             }
 
@@ -212,6 +222,9 @@ namespace RepairTasks
         private static void Repair(Object obj)
         {
             State state = (State)obj;
+            int successCount = 0;
+            int failCount = 0;
+            bool abnormal = false;
 
             try
             {
@@ -341,6 +354,7 @@ namespace RepairTasks
                         if (p.ExitCode == 0)
                         {
                             AddReport(state, "Recovered task: " + target.FullName);
+                            successCount++;
                             success = true;
                         }
                         else
@@ -356,6 +370,8 @@ namespace RepairTasks
                         // If setup failed, restore the state so that the next scan picks it up
                         if (!success)
                         {
+                            failCount++;
+
                             if (renamedTask)
                                 RestoreTaskFile(state, tempFilePath, rootDir + target.FullName);
 
@@ -376,17 +392,19 @@ namespace RepairTasks
                         }
                     }
                 }
-
-                Application.Current.Dispatcher.Invoke(new Action(delegate
-                {
-                    state.Status = "Repair completed";
-                    state.CanScan = true;
-                }));
             }
             catch (System.Exception ex)
             {
                 AddReport(state, String.Format("Repair terminated by unexpected error '{0}'", ex.Message));
+                abnormal = true;
             }
+
+            Application.Current.Dispatcher.Invoke(new Action(delegate
+            {
+                state.Status = String.Format("Repair completed{0}: {1} tasks repaired; {2} repairs failed",
+                                             abnormal ? " abnormally" : "", successCount, failCount);
+                state.CanScan = true;
+            }));
         }
 
         private static void AddReport(State state, string report)
@@ -430,6 +448,7 @@ namespace RepairTasks
             {
                 AddReport(state, "Backed up tasks to: " + target);
                 Properties.Settings.Default.HasBackedUp = true;
+                Properties.Settings.Default.Save();
             }
             else
             {
