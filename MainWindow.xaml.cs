@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Packaging;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -45,8 +46,12 @@ namespace RepairTasks
 
         private void repair_Click(object sender, RoutedEventArgs e)
         {
-            state.Reports.Clear();
-            state.UseCopy = (rbCopy.IsChecked == true);
+            if (rbRecycle.IsChecked == true)
+                state.Source = Source.Recycle;
+            else if (rbZip.IsChecked == true)
+                state.Source = Source.Zip;
+            else  // other
+                state.Source = Source.Other;
 
             // See if they want a backup
             if (!Properties.Settings.Default.HasBackedUp)
@@ -58,27 +63,75 @@ namespace RepairTasks
                     return;
             }
 
+            // if we are using our downloaded zip file of Windows 7 task files, prompt for its location
+            if (state.Source == Source.Zip)
+            {
+                System.Windows.Forms.OpenFileDialog dialog = new System.Windows.Forms.OpenFileDialog
+                {
+                    CheckFileExists = true,
+                    InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                    Filter = "Zip files (.zip)|*.zip",
+                    Title = "Select the downloaded zip file of Windows 7 task files."
+                };
+
+                if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+                    return;
+
+                if (!VerifyZip(state, dialog.FileName))
+                    return;
+
+                state.SourcePath = dialog.FileName;
+            }
+
             // If we are using an independent source of task XML files, prompt for the folder that contains them
-            if (state.UseCopy)
+            else if (state.Source == Source.Other)
             {
                 System.Windows.Forms.FolderBrowserDialog dialog = new System.Windows.Forms.FolderBrowserDialog
                 {
                     ShowNewFolderButton = false,
-                    RootFolder = Environment.SpecialFolder.MyDocuments,
+                    RootFolder = Environment.SpecialFolder.Desktop,
+                    SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
                     Description = "Select the directory containing the backed up task files to be installed."
                 };
 
                 if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
                     return;
                 else
-                    state.CopyPath = dialog.SelectedPath;
+                    state.SourcePath = dialog.SelectedPath;
             }
 
+            state.Reports.Clear();
             state.CanScan = false;
             state.CanRepair = false;
             state.Status = "Repairing...";
 
             ThreadPool.QueueUserWorkItem(Repair, state);
+        }
+
+        private void unplug_Click(object sender, RoutedEventArgs e)
+        {
+            var target = (Target)((Report)lbReports.SelectedItem).Tag;
+            var result = MessageBox.Show(String.Format("This will unplug '{0}' from Task Scheduler. It will still be reported and available " +
+                "for repair by RepairTasks. Do you want to proceed?", target.FullName), "Unplug Task", MessageBoxButton.YesNo);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                state.Reports.Clear();
+                state.CanScan = true;
+                state.CanRepair = false;
+
+                Dictionary<string, string> dictRegKeys = new Dictionary<string, string>();
+
+                // Find the registry entries
+                FindRegistryEntries(target, dictRegKeys);
+
+                // Delete registry keys
+                foreach (string key in dictRegKeys.Keys)
+                    Registry.LocalMachine.DeleteSubKey(key);
+
+                state.Reports.Add(new Report(String.Format("Task '{0}' is now unplugged from the Task Scheduler", target.FullName)));
+                state.Status = "Unplug completed";
+            }
         }
 
         private void backup_Click(object sender, RoutedEventArgs e)
@@ -88,7 +141,8 @@ namespace RepairTasks
             System.Windows.Forms.FolderBrowserDialog dialog = new System.Windows.Forms.FolderBrowserDialog
             {
                 ShowNewFolderButton = false,
-                RootFolder = Environment.SpecialFolder.MyDocuments,
+                RootFolder = Environment.SpecialFolder.Desktop,
+                SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
                 Description = "Select a folder to create task backups in."
             };
 
@@ -119,6 +173,22 @@ namespace RepairTasks
             }
         }
 
+        private void lbReports_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            var report = lbReports.SelectedItem as Report;
+            if (report != null)
+            {
+                var target = report.Tag as Target;
+                if (target != null)
+                {
+                    state.CanUnplug = true;
+                    return;
+                }
+            }
+
+            state.CanUnplug = false;
+        }
+
         private static string rootDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "Tasks") + @"\";
         private static string hiddenSuffix = "._hidden_";
 
@@ -144,6 +214,11 @@ namespace RepairTasks
                 state.Status = String.Format("Scan completed{0}: {1} problems found", abnormal ? " abnormally" : "", state.Targets.Count);
                 state.CanScan = true;
                 state.CanRepair = state.Targets.Count > 0;
+
+                if (IsGangOfFive(state))
+                    MessageBox.Show("These five tasks are typically left in an unusable state by reversion from Windows 10. To fix them, " +
+                        "download Windows7 Tasks.zip from my site, if you have not done so already, " +
+                        "then check the 'Take tasks from Windows7 Tasks.zip' radio button and click Repair", "Typical Windows 10 reversion errors");
             }));
         }
 
@@ -191,16 +266,17 @@ namespace RepairTasks
 
                     if (p.ExitCode != 0)
                     {
-                        state.Targets.Add(new Target { RelativePath = relPath, Name = fi.Name });
+                        var target = new Target { RelativePath = relPath, Name = fi.Name };
+                        state.Targets.Add(target);
                         Application.Current.Dispatcher.Invoke(new Action(delegate
                         {
                             // TODO: break the dependence on the specific English form of these messages
                             if (error.StartsWith("ERROR: The task image is corrupt or has been tampered with."))
-                                state.Reports.Add(new Report("Task image corrupt: " + relPath + fi.Name));
+                                state.Reports.Add(new Report("Task image corrupt: " + relPath + fi.Name, target));
                             else if (error.StartsWith("ERROR: The system cannot find the file specified"))
                                 state.Reports.Add(new Report("Task not installed: " + relPath + fi.Name));
-                            else 
-                                state.Reports.Add(new Report(String.Format("Task {0} reported '{1}'", relPath + fi.Name, error)));
+                            else
+                                state.Reports.Add(new Report(String.Format("Task {0} reported '{1}'", relPath + fi.Name, error), target));
                         }));    
                     }
                 }
@@ -230,7 +306,6 @@ namespace RepairTasks
             {
                 foreach (Target target in state.Targets)
                 {
-                    // Copy the existing file to the temp folder
                     string tempFilePath = Path.GetTempPath() + @"\" + target.Name;
                     Dictionary<string, string> dictRegKeys = new Dictionary<string, string>();
                     bool success = false;
@@ -239,69 +314,47 @@ namespace RepairTasks
 
                     try
                     {
-                        File.Copy(rootDir + target.FullName, tempFilePath);
-                    }
-                    catch (System.Exception e)
-                    {
-                        AddReport(state, String.Format("Cannot copy task file '{0}', {1}", rootDir + target.FullName, e.Message));
-
-                        continue;
-                    }
-
-                    try
-                    {
                         // Identify the task file to be installed
                         string taskFilePath = null;
-                        if (state.UseCopy)
+                        if (state.Source == Source.Recycle)
                         {
-                            string fullPath = state.CopyPath + @"\" + target.FullName;
-                            string shortPath = state.CopyPath + @"\" + target.Name;
-                            if (File.Exists(fullPath))
-                                taskFilePath = fullPath;
-                            else if (File.Exists(shortPath))
-                                taskFilePath = shortPath;
-                            else
+                            try
                             {
-                                AddReport(state, String.Format("Cannot find either '{0}' or '{1}'", shortPath, fullPath));
-
-                                // Clean up temp file
-                                File.Delete(tempFilePath);
+                                // Copy the existing file to the temp folder
+                                File.Copy(rootDir + target.FullName, tempFilePath);
+                            }
+                            catch (System.Exception e)
+                            {
+                                AddReport(state, String.Format("Cannot copy task file '{0}', {1}", rootDir + target.FullName, e.Message));
 
                                 continue;
                             }
-                        }
-                        else
-                        {
                             taskFilePath = tempFilePath;
+                        }
+                        else if (state.Source == Source.Zip)
+                        {
+                            // Try to unzip the required file into the temp folder
+                            if (!UnzipTask(state, target.FullName, tempFilePath, state.SourcePath))
+                                continue;
+
+                            taskFilePath = tempFilePath;
+                        }
+                        else // if (state.Source == Source.Other)
+                        {
+                            taskFilePath = LocateTaskFileUnder(target, state.SourcePath);
+                            if (taskFilePath == null)
+                            {
+                                AddReport(state, String.Format("Cannot find '{0}' under '{1}'", target.FullName, state.SourcePath));
+                                continue;
+                            }
+                            else
+                            {
+                                AddReport(state, String.Format("Using '{0}' to repair '{1}'", taskFilePath, target.FullName));
+                            }
                         }
 
                         // Find the registry entries
-                        string treeKeyPath = TaskCache + @"Tree\" + target.FullName;
-                        string keyPath = null;
-
-                        var treeKey = Registry.LocalMachine.OpenSubKey(treeKeyPath);
-                        if (treeKey != null)
-                        {
-                            dictRegKeys.Add(treeKeyPath, null);
-                            string id = treeKey.GetValue("Id") as string;
-                            if (id != null)
-                            {
-                                // Check under Tasks
-                                keyPath = TaskCache + Tasks + id;
-                                if (null != Registry.LocalMachine.OpenSubKey(keyPath))
-                                    dictRegKeys.Add(keyPath, null);
-
-                                // and the groups
-                                foreach (string group in Groups)
-                                {
-                                    keyPath = TaskCache + group + id;
-                                    if (null != Registry.LocalMachine.OpenSubKey(keyPath))
-                                        dictRegKeys.Add(keyPath, null);
-                                }
-                            }
-                        }
-                        else
-                            treeKeyPath = null;
+                        FindRegistryEntries(target, dictRegKeys);
 
                         // Save the registry entries
                         uint result = RegKey.ExportRegKeys(dictRegKeys);
@@ -358,7 +411,7 @@ namespace RepairTasks
                             success = true;
                         }
                         else
-                            AddReport(state, String.Format("Recovery of task {0} failed with '{1}'", target.FullName, error));
+                            AddReport(state, String.Format("Recovery of task {0} failed with '{1}'", target.FullName, error), target);
 
                     }
                     catch (System.Exception ex)
@@ -407,12 +460,133 @@ namespace RepairTasks
             }));
         }
 
-        private static void AddReport(State state, string report)
+        private static void AddReport(State state, string report, object tag = null)
         {
             Application.Current.Dispatcher.Invoke(new Action(delegate
             {
-                state.Reports.Add(new Report(report));
+                state.Reports.Add(new Report(report, tag));
             }));
+        }
+
+        private static bool VerifyZip(State state, string zipFile)
+        {
+            bool success = false;
+
+            try
+            {
+                using (Package package = Package.Open(zipFile, FileMode.Open, FileAccess.Read))
+                {
+                    if (package.GetParts().Count() == 0)
+                        MessageBox.Show(String.Format("'{0}' does not contain files in the correct format. " +
+                                        "Please check that you have downloaded the latest version of Windows7 Tasks.zip", zipFile), "Error");
+                    else
+                        success = true;
+                }
+            }
+            catch (System.Exception e)
+            {
+                AddReport(state, String.Format("Cannot open zip file '{0}: {1}", zipFile, e.Message));
+            }
+
+            return success;
+        }
+
+        private static bool UnzipTask(State state, string fullName, string tempFilePath, string zipFile)
+        {
+            bool success = false;
+            string zipUri = "/" + fullName.Replace(" ", "_").Replace(@"\", "/");
+            var partUri = new Uri(zipUri, UriKind.Relative);
+
+            try
+            {
+                using (Package package = Package.Open(zipFile, FileMode.Open, FileAccess.Read))
+                {
+                    var part = package.GetPart(partUri);
+
+                    using (Stream source = part.GetStream(FileMode.Open, FileAccess.Read))
+                    using (Stream destination = File.OpenWrite(tempFilePath))
+                    {
+                        byte[] buffer = new byte[0x1000];
+                        int read;
+                        while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            destination.Write(buffer, 0, read);
+                        }
+                        success = true;
+                    }
+                }
+            }
+            catch (System.Exception e)
+            {
+                AddReport(state, String.Format("Cannot extract task file '{0}' from zip file '{1}: {2}", fullName, zipFile, e.Message));
+            }
+
+            return success;
+        }
+
+        private static string LocateTaskFileUnder(Target target, string path)
+        {
+            // Try for full path, and if not, look in root of folder
+            string fullPath = path + @"\" + target.FullName;
+            string shortPath = path + @"\" + target.Name;
+            if (File.Exists(fullPath))
+                return fullPath;
+            else if (File.Exists(shortPath))
+                return shortPath;
+
+            // No luck, walk the tree
+            DirectoryInfo di = new DirectoryInfo(path);
+            return LocateTaskFileHelper(target, di);
+        }
+
+        private static string LocateTaskFileHelper(Target target, DirectoryInfo di)
+        {
+            var file = di.GetFiles().Where(fi => fi.Name == target.Name).FirstOrDefault();
+            if (file != null)
+            {
+                // demand that immediately containing folders match
+                string dir = target.RelativePath.Split(new char[] { Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries).Last();
+                if (dir == di.Name)
+                    return file.FullName;
+            }
+
+            foreach (var dic in di.GetDirectories())
+            {
+                string f = LocateTaskFileHelper(target, dic);
+                if (f != null)
+                    return f;
+            }
+
+            return null;
+        }
+
+        private static void FindRegistryEntries(Target target, Dictionary<string, string> dictRegKeys)
+        {
+            // Find the registry entries
+            string treeKeyPath = TaskCache + @"Tree\" + target.FullName;
+            string keyPath = null;
+
+            var treeKey = Registry.LocalMachine.OpenSubKey(treeKeyPath);
+            if (treeKey != null)
+            {
+                dictRegKeys.Add(treeKeyPath, null);
+                string id = treeKey.GetValue("Id") as string;
+                if (id != null)
+                {
+                    // Check under Tasks
+                    keyPath = TaskCache + Tasks + id;
+                    if (null != Registry.LocalMachine.OpenSubKey(keyPath))
+                        dictRegKeys.Add(keyPath, null);
+
+                    // and the groups
+                    foreach (string group in Groups)
+                    {
+                        keyPath = TaskCache + group + id;
+                        if (null != Registry.LocalMachine.OpenSubKey(keyPath))
+                            dictRegKeys.Add(keyPath, null);
+                    }
+                }
+            }
         }
 
         private static void RestoreTaskFile(State state, string tempFile, string taskFile)
@@ -427,6 +601,22 @@ namespace RepairTasks
             }
         }
 
+        private static bool IsGangOfFive(State state)
+        {
+            if (state.Targets.Count == 5)
+            {
+                var names = state.Targets.Select(t => t.FullName).ToList();
+                names.Sort();
+                return names[0] == @"Microsoft\Windows\PerfTrack\BackgroundConfigSurveyor" &&
+                       names[1] == @"Microsoft\Windows\RAC\RacTask" &&
+                       names[2] == @"Microsoft\Windows\Shell\WindowsParentalControls" &&
+                       names[3] == @"Microsoft\Windows\Tcpip\IpAddressConflict1" &&
+                       names[4] == @"Microsoft\Windows\Tcpip\IpAddressConflict2";
+            }
+
+            return false;
+        }
+
         private void BackupTasks(string path)
         {
             string source = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "Tasks");
@@ -434,14 +624,10 @@ namespace RepairTasks
 
             Process p = new Process();
             p.StartInfo.UseShellExecute = true;
-            //p.StartInfo.RedirectStandardOutput = true;
-            //p.StartInfo.RedirectStandardError = true;
             p.StartInfo.CreateNoWindow = false;
             p.StartInfo.FileName = "xcopy";
             p.StartInfo.Arguments = "/S /I /E \"" + source +  "\" \"" + target + "\"";
             p.Start();
-            //string output = p.StandardOutput.ReadToEnd();
-            //string error = p.StandardError.ReadToEnd().Replace("\r", "").Replace("\n", "");
             p.WaitForExit();
 
             if (p.ExitCode == 0)

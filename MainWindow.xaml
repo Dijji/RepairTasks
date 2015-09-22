@@ -1,20 +1,23 @@
 ﻿<Window x:Class="RepairTasks.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Repair Tasks" Height="350" Width="525">
+        Title="Repair Tasks" Height="350" Width="625">
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="40" />
+            <RowDefinition Height="65" />
             <RowDefinition Height="*" />
             <RowDefinition Height="35" />
         </Grid.RowDefinitions>
-        <StackPanel Grid.Row="0"  Height="40" HorizontalAlignment="Left" Name="stackPanel1" VerticalAlignment="Top" Width="503" Orientation="Horizontal">
+        <StackPanel Grid.Row="0"  HorizontalAlignment="Left" Name="stackPanel1" VerticalAlignment="Top"  Orientation="Horizontal">
             <Button Content="Scan" Margin="10,0,0,0" Height="23" Name="scan" Width="75" FontSize="12" Click="scan_Click" IsEnabled="{Binding Path=CanScan}"/>
             <Button Content="Repair" Margin="10,0,0,0" Height="23" Name="repair" Width="75" FontSize="12" Click="repair_Click"  IsEnabled="{Binding Path=CanRepair}" />
-            <RadioButton Margin="40,0,0,0" Content="Recycle existing tasks" Height="16" Name="rbExisting" FontSize="12" IsChecked="True" />
-            <RadioButton Margin="10,0,0,0" Content="Take tasks from backup" Height="16" Name="rbCopy" FontSize="12" />
+            <StackPanel Grid.Row="0" Margin="40,0,0,0"  HorizontalAlignment="Left" Name="stackPanel2" VerticalAlignment="Top"  Orientation="Vertical">
+                <RadioButton Margin="0,5,0,0" Content="Recycle existing tasks" Height="16" Name="rbRecycle" FontSize="12" IsChecked="True" />
+                <RadioButton Margin="0,5,0,0" Content="Take tasks from Windows7 Tasks.zip" Height="16" Name="rbZip" FontSize="12" />
+                <RadioButton Margin="0,5,0,0" Content="Take tasks from backup" Height="16" Name="rbOther" FontSize="12" />
+            </StackPanel>
         </StackPanel>
-        <ListBox Grid.Row="1" Name="lbReports" ItemsSource="{Binding Path=Reports}" FontSize="12" >
+        <ListBox Grid.Row="1" Name="lbReports" ItemsSource="{Binding Path=Reports}" FontSize="12" SelectionChanged="lbReports_SelectionChanged" >
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <TextBlock Text="{Binding Path=Text}" />
@@ -26,10 +29,12 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="100"/>
                 <ColumnDefinition Width="100"/>
+                <ColumnDefinition Width="100"/>
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Margin="12,7,0,0" Name="textBlock1" Text="{Binding Path=Status}" FontSize="12" />
-            <Button Grid.Column="1" Content="Backup Tasks" Margin="10,7,5,5" Name="backup" FontSize="12" Click="backup_Click"  />
-            <Button Grid.Column="2" Content="Save Results" Margin="10,7,5,5" Name="save" FontSize="12" Click="save_Click"  />
+            <Button Grid.Column="1" Content="Unplug Task" Margin="10,7,5,5" Name="unplug" FontSize="12" Click="unplug_Click"  IsEnabled="{Binding Path=CanUnplug}"/>
+            <Button Grid.Column="2" Content="Backup Tasks" Margin="10,7,5,5" Name="backup" FontSize="12" Click="backup_Click"  />
+            <Button Grid.Column="3" Content="Save Results" Margin="10,7,5,5" Name="save" FontSize="12" Click="save_Click"  />
         </Grid>
 
     </Grid>
