@@ -48,8 +48,6 @@ namespace RepairTasks
         {
             if (rbRecycle.IsChecked == true)
                 state.Source = Source.Recycle;
-            else if (rbZip.IsChecked == true)
-                state.Source = Source.Zip;
             else  // other
                 state.Source = Source.Other;
 
@@ -63,41 +61,38 @@ namespace RepairTasks
                     return;
             }
 
-            // if we are using our downloaded zip file of Windows 7 task files, prompt for its location
-            if (state.Source == Source.Zip)
+            // We are using our downloaded zip file of Windows 7 task files, or an independent source of task XML files,
+            // so prompt for the zip file or folder that contains them
+            if (state.Source == Source.Other)
             {
-                System.Windows.Forms.OpenFileDialog dialog = new System.Windows.Forms.OpenFileDialog
+                var dialog = new Ionic.Utils.FolderBrowserDialogEx
                 {
-                    CheckFileExists = true,
-                    InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                    Filter = "Zip files (.zip)|*.zip",
-                    Title = "Select the downloaded zip file of Windows 7 task files."
-                };
-
-                if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
-                    return;
-
-                if (!VerifyZip(state, dialog.FileName))
-                    return;
-
-                state.SourcePath = dialog.FileName;
-            }
-
-            // If we are using an independent source of task XML files, prompt for the folder that contains them
-            else if (state.Source == Source.Other)
-            {
-                System.Windows.Forms.FolderBrowserDialog dialog = new System.Windows.Forms.FolderBrowserDialog
-                {
+                    Description = "Select the downloaded zip file of Windows 7 task files, or a directory containing backed up task files.",
                     ShowNewFolderButton = false,
+                    ShowEditBox = true,
+                    NewStyle = true,
                     RootFolder = Environment.SpecialFolder.Desktop,
                     SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                    Description = "Select the directory containing the backed up task files to be installed."
+                    ShowBothFilesAndFolders = true,
+                    ShowFullPathInEditBox = false,
+                    DontExpandZip = true,
+                    ValidExtensions = new string[1] { "zip" },
                 };
 
                 if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
                     return;
                 else
+                {
+                    if (Path.GetExtension(dialog.SelectedPath).ToLower() == ".zip")
+                    {
+                        if (!VerifyZip(state, dialog.SelectedPath))
+                            return;
+
+                        state.Source = Source.Zip;
+                    }
+
                     state.SourcePath = dialog.SelectedPath;
+                }
             }
 
             state.Reports.Clear();

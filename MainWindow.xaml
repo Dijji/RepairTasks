@@ -4,18 +4,15 @@
         Title="Repair Tasks" Height="350" Width="625">
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="65" />
+            <RowDefinition Height="40" />
             <RowDefinition Height="*" />
             <RowDefinition Height="35" />
         </Grid.RowDefinitions>
-        <StackPanel Grid.Row="0"  HorizontalAlignment="Left" Name="stackPanel1" VerticalAlignment="Top"  Orientation="Horizontal">
+        <StackPanel Grid.Row="0"  Height="40" HorizontalAlignment="Left" Name="stackPanel1" VerticalAlignment="Top" Width="503" Orientation="Horizontal">
             <Button Content="Scan" Margin="10,0,0,0" Height="23" Name="scan" Width="75" FontSize="12" Click="scan_Click" IsEnabled="{Binding Path=CanScan}"/>
             <Button Content="Repair" Margin="10,0,0,0" Height="23" Name="repair" Width="75" FontSize="12" Click="repair_Click"  IsEnabled="{Binding Path=CanRepair}" />
-            <StackPanel Grid.Row="0" Margin="40,0,0,0"  HorizontalAlignment="Left" Name="stackPanel2" VerticalAlignment="Top"  Orientation="Vertical">
-                <RadioButton Margin="0,5,0,0" Content="Recycle existing tasks" Height="16" Name="rbRecycle" FontSize="12" IsChecked="True" />
-                <RadioButton Margin="0,5,0,0" Content="Take tasks from Windows7 Tasks.zip" Height="16" Name="rbZip" FontSize="12" />
-                <RadioButton Margin="0,5,0,0" Content="Take tasks from backup" Height="16" Name="rbOther" FontSize="12" />
-            </StackPanel>
+            <RadioButton Margin="40,0,0,0" Content="Recycle existing tasks" Height="16" Name="rbRecycle" FontSize="12" IsChecked="True" />
+            <RadioButton Margin="10,0,0,0" Content="Take tasks from backup" Height="16" Name="rbOther" FontSize="12" />
         </StackPanel>
         <ListBox Grid.Row="1" Name="lbReports" ItemsSource="{Binding Path=Reports}" FontSize="12" SelectionChanged="lbReports_SelectionChanged" >
             <ListBox.ItemTemplate>
