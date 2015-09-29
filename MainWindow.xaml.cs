@@ -213,7 +213,8 @@ namespace RepairTasks
                 if (IsGangOfFive(state))
                     MessageBox.Show("These five tasks are typically left in an unusable state by reversion from Windows 10. To fix them, " +
                         "download Windows7 Tasks.zip from my site, if you have not done so already, " +
-                        "then check the 'Take tasks from Windows7 Tasks.zip' radio button and click Repair", "Typical Windows 10 reversion errors");
+                        "then check the 'Take tasks from backup' radio button, click Repair, " + 
+                        "and select the downloaded zip file in the dialog that pops up", "Typical Windows 10 reversion errors");
             }));
         }
 
@@ -496,24 +497,29 @@ namespace RepairTasks
             {
                 using (Package package = Package.Open(zipFile, FileMode.Open, FileAccess.Read))
                 {
-                    var part = package.GetPart(partUri);
-
-                    using (Stream source = part.GetStream(FileMode.Open, FileAccess.Read))
-                    using (Stream destination = File.OpenWrite(tempFilePath))
+                    if (package.PartExists(partUri))
                     {
-                        byte[] buffer = new byte[0x1000];
-                        int read;
-                        while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+                        var part = package.GetPart(partUri);
+
+                        using (Stream source = part.GetStream(FileMode.Open, FileAccess.Read))
+                        using (Stream destination = File.OpenWrite(tempFilePath))
                         {
-                            destination.Write(buffer, 0, read);
+                            byte[] buffer = new byte[0x1000];
+                            int read;
+                            while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+                            {
+                                destination.Write(buffer, 0, read);
+                            }
+                            success = true;
                         }
-                        success = true;
                     }
+                    else
+                        AddReport(state, String.Format("Zip file '{0}' does not contain task file '{1}'", zipFile, fullName));
                 }
             }
             catch (System.Exception e)
             {
-                AddReport(state, String.Format("Cannot extract task file '{0}' from zip file '{1}: {2}", fullName, zipFile, e.Message));
+                AddReport(state, String.Format("Cannot extract task file '{0}' from zip file '{1}': {2}", fullName, zipFile, e.Message));
             }
 
             return success;

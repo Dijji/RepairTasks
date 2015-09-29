@@ -22,5 +22,17 @@ namespace RepairTasks.Properties {
                 return defaultInstance;
             }
         }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool HasBackedUp {
+            get {
+                return ((bool)(this["HasBackedUp"]));
+            }
+            set {
+                this["HasBackedUp"] = value;
+            }
+        }
     }
 }
