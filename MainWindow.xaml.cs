@@ -185,15 +185,23 @@ namespace RepairTasks
         }
 
         private static string rootDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "Tasks") + @"\";
+        private static string logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"LogFiles\Scm");
         private static string hiddenSuffix = "._hidden_";
 
         private static void Scan(Object obj)
         {
             State state = (State)obj;
+            int dirErrorCount = 0;
             bool abnormal = false;
 
             try
             {
+                if (!Directory.Exists(logDir))
+                {
+                    dirErrorCount++;
+                    AddReport(state, String.Format("Required log file directory '{0}' is missing", logDir));
+                }
+
                 DirectoryInfo root = new DirectoryInfo(rootDir);
 
                 ScanDirectory(state, root);
@@ -206,9 +214,9 @@ namespace RepairTasks
 
             Application.Current.Dispatcher.Invoke(new Action(delegate
             {
-                state.Status = String.Format("Scan completed{0}: {1} problems found", abnormal ? " abnormally" : "", state.Targets.Count);
+                state.Status = String.Format("Scan completed{0}: {1} problems found", abnormal ? " abnormally" : "", dirErrorCount + state.Targets.Count);
                 state.CanScan = true;
-                state.CanRepair = state.Targets.Count > 0;
+                state.CanRepair = (dirErrorCount + state.Targets.Count) > 0;
 
                 if (IsGangOfFive(state))
                     MessageBox.Show("These five tasks are typically left in an unusable state by reversion from Windows 10. To fix them, " +
@@ -246,6 +254,11 @@ namespace RepairTasks
 
                 try
                 {
+                    Application.Current.Dispatcher.Invoke(new Action(delegate
+                    {
+                        state.Status = String.Format("Checking {0}...", relPath + fi.Name);
+                    }));
+
                     // Start the child process.
                     Process p = new Process();
                     // Redirect the output stream of the child process.
@@ -300,6 +313,21 @@ namespace RepairTasks
 
             try
             {
+                if (!Directory.Exists(logDir))
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(logDir);
+                        AddReport(state, String.Format("Created required log file directory '{0}'", logDir));
+                        successCount++;
+                    }
+                    catch (System.Exception e)
+                    {
+                        AddReport(state, String.Format("Failed to create required log file directory '{0}', '{1}'", logDir, e.Message));
+                        failCount++;
+                    }
+                }
+
                 foreach (Target target in state.Targets)
                 {
                     string tempFilePath = Path.GetTempPath() + @"\" + target.Name;
@@ -450,7 +478,7 @@ namespace RepairTasks
 
             Application.Current.Dispatcher.Invoke(new Action(delegate
             {
-                state.Status = String.Format("Repair completed{0}: {1} tasks repaired; {2} repairs failed",
+                state.Status = String.Format("Repair completed{0}: {1} repairs succeeded; {2} repairs failed",
                                              abnormal ? " abnormally" : "", successCount, failCount);
                 state.CanScan = true;
             }));
