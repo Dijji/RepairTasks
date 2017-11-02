@@ -1,4 +1,4 @@
-if you are dealing with problems having reverted from Windows 10 to Windows 7 or 8.1, and you are in a hurry, you can try this [Walk-through](Walk-through).  For the full story, read on.
+﻿if you are dealing with problems having reverted from Windows 10 to Windows 7 or 8.1, and you are in a hurry, you can try this [Walk-through](Walk-through.md).  For the full story, read on.
 
 Firstly, we will need to understand a little about how tasks are described in Windows.
 
