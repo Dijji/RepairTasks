@@ -13,7 +13,7 @@ The general recommendation in response to this reversion problem seems to be to 
 
 And now, I'm sharing my work in case it is of use to fellow sufferers, pending Microsoft getting their act together and fixing reversion.
 
-Open source is particularly appropriate for this type of project, as the code necessarily delves into system settings, making complete transparency as to what it does crucial. You are encouraged to download the source, which is actually not huge, and understand what it does. However, I also provide a [release](releases) of the executable, and [a wiki](wiki) which describes how to use the program.
+Open source is particularly appropriate for this type of project, as the code necessarily delves into system settings, making complete transparency as to what it does crucial. You are encouraged to download the source, which is actually not huge, and understand what it does. However, I also provide a [release](../../releases) of the executable, and [a wiki](../../wiki) which describes how to use the program.
 
 Thank you to all the kind reviewers of the evolving versions, and the folks that have given me such great feedback and so helped make the program better.  But if you have a problem, feel free to raise it as an Issue.  I will try and make any needed improvements to the program in response.
 
