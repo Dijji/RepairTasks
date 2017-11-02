@@ -10,7 +10,7 @@ The solution to the problem is to delete the registry entries and XML file from 
 
 The program supplied by this project, RepairTasks, looks like this:
 
-![](Documentation_RepairTasksV31.JPG?raw=true)
+<img src="Documentation_RepairTasksV31.JPG" width="200">
 
 To start it, first copy the two files from RepairTasks.zip to a folder of your choice and then run RepairTasks.exe. The copying step is recommended because RepairTasks must run with administrative privileges, and some users have found that it will not do so if run from within the zip file.
 
